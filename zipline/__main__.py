@@ -419,7 +419,7 @@ def zipline_magic(line, cell=None):
 )
 @click.option(
     '--writer',
-    default="rocksdb",
+    default="bcolz",
     help='writer class name for bundle to write minute data'
 )
 def ingest(bundle, assets, minute, start, fundamental, assets_version, show_progress, writer):

@@ -7,21 +7,50 @@ from lru import LRU
 from intervaltree import IntervalTree
 from .minute_bars import BcolzMinuteBarWriter, BcolzMinuteBarMetadata, BcolzMinuteWriterColumnMismatch, BcolzMinuteBarReader
 from .minute_bars import OHLC_RATIO, DEFAULT_EXPECTEDLEN
-from .minute_bars import convert_cols, _sid_subdir_path
+from .minute_bars import convert_cols
 import os
 import pandas as pd
 from toolz import keymap, valmap
-import json
+import datetime
 import numpy as np
 import rocksdb
 import logbook
 import glob
 import struct
-from six import PY3
 import time
-from zipline.gens.sim_engine import NANOS_IN_MINUTE
+import pytz
 from zipline.utils.memoize import lazyval
 
+
+def _sid_subdir_path(sid):
+    """
+    Format subdir path to limit the number directories in any given
+    subdirectory to 100.
+
+    The number in each directory is designed to support at least 100000
+    equities.
+
+    Parameters:
+    -----------
+    sid : int
+        Asset identifier.
+
+    Returns:
+    --------
+    out : string
+        A path for the bcolz rootdir, including subdirectory prefixes based on
+        the padded string representation of the given sid.
+
+        e.g. 1 is formatted as 00/00/000001.bcolz
+    """
+    padded_sid = format(sid, '06')
+    return os.path.join(
+        # subdir 1 00/XX
+        padded_sid[0:2],
+        # subdir 2 XX/00
+        padded_sid[2:4],
+        "{0}.rocksdb".format(str(padded_sid))
+    )
 
 
 class RocksdbMinuteBarWriter(BcolzMinuteBarWriter):
@@ -230,6 +259,21 @@ class RocksdbMinuteBarWriter(BcolzMinuteBarWriter):
 
     db = None
 
+    def sidpath(self, sid):
+        """
+        Parameters:
+        -----------
+        sid : int
+            Asset identifier.
+
+        Returns:
+        --------
+        out : string
+            Full path to the bcolz rootdir for the given sid.
+        """
+        sid_subdir = _sid_subdir_path(sid)
+        return os.path.join(self._rootdir, sid_subdir)
+
     def _ensure_ctable(self, sid):
         """Ensure that a ctable exists for ``sid``, then return it."""
         sidpath = self.sidpath(sid)
@@ -385,9 +429,8 @@ class RocksdbMinuteBarWriter(BcolzMinuteBarWriter):
             close_col[dt_ixs],
             vol_col[dt_ixs],
         ) = convert_cols(cols, ohlc_ratio, sid, invalid_data_behavior)
-
+        single_size = len(struct.pack('@i', open_col[0]))
         for i in range(0, minutes_count):
-            single_size = len(struct.pack('@i',open_col[i]))
             bts = bytearray(single_size*5)
             index = 0
             bts[index: index+single_size] = struct.pack('@i',open_col[i])
@@ -399,7 +442,7 @@ class RocksdbMinuteBarWriter(BcolzMinuteBarWriter):
             bts[index: index + single_size] = struct.pack('@i', low_col[i])
             index += single_size
             bts[index: index + single_size] = struct.pack('@i', vol_col[i])
-            table.put(b'default', struct.pack('@i',int(time.mktime(all_minutes_in_window[i].timetuple()))), bytes(bts))
+            table.put(b'default', struct.pack('>i',int(time.mktime(all_minutes_in_window[i].timetuple()))), bytes(bts))
 
         self.db.close()
         del self.db
@@ -603,13 +646,16 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
 
         dts = []
         vals = []
+        local_tz = self.calendar.tz
         for k, v in it:
-            dts.append(struct.unpack("@i", k))
+            #dts.append(datetime.datetime.fromtimestamp(struct.unpack(">i", k)[0]).replace(tzinfo=pytz.UTC).astimezone(local_tz))
+            dts.append(datetime.datetime.fromtimestamp(struct.unpack(">i", k)[0]))
             vals.append(struct.unpack("@i", bytearray(v)[self.FIELD_MAP[field] * self.FIELD_VAL_SIZE:(self.FIELD_MAP[field]+1) * self.FIELD_VAL_SIZE]))
+        del it
         items = {"dt": dts}
         items[field] = vals
         df = pd.DataFrame.from_dict(items)
-        df["dt"] = pd.to_datetime(df['dt'],unit='s')
+        df["dt"] = pd.to_datetime(df['dt'])
         df.set_index(["dt"])
         return df
 
@@ -683,7 +729,7 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
             Returns the integer value of the volume.
             (A volume of 0 signifies no trades for the given dt.)
         """
-        key = struct.pack("@i", int(dt.value / 10 ** 9))
+        key = struct.pack(">i", int(dt.value / 10 ** 9))
         path = self.sidpath(sid)
         db = self._open_db(sid, path)
         value = db.get(b'default', key)
@@ -723,22 +769,21 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
 
         dts = []
         vals = dict()
+        local_tz = self.calendar.tz
         for k, v in it:
-            if end is not None:
-                if k > end:
-                    break
-            dts.append(struct.unpack("@i", k))
-            barr = bytearray(v)
+            dts.append(datetime.datetime.fromtimestamp(struct.unpack(">i", k)[0]))
+            barr = struct.unpack("@iiiii", v)
             for field in fields:
                 if field in vals:
                     val = vals[field]
                 else:
                     val = []
                     vals[field] = val
-                val.append(struct.unpack("@i",barr[self.FIELD_MAP[field] * self.FIELD_VAL_SIZE:(self.FIELD_MAP[field]+1) * self.FIELD_VAL_SIZE]))
+                val.append(barr[self.FIELD_MAP[field]])
+        del it
         vals["dt"] = dts
         df = pd.DataFrame.from_dict(vals)
-        df["dt"] = pd.to_datetime(df['dt'],unit='s')
+        df["dt"] = pd.to_datetime(df['dt'])
         df.set_index(["dt"])
         return df
 
@@ -762,8 +807,8 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
             (minutes in range, sids) with a dtype of float64, containing the
             values for the respective field over start and end dt range.
         """
-        start_idx = struct.pack("@i", int(start_dt.value // 10 ** 9))
-        end_idx = struct.pack("@i", int(end_dt.value // 10 ** 9))
+        start_idx = struct.pack(">i", int(start_dt.value // 10 ** 9))
+        end_idx = struct.pack(">i", int(end_dt.value // 10 ** 9))
 
         num_minutes = (end_idx - start_idx + 1)
 
