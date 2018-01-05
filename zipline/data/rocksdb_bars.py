@@ -503,6 +503,8 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
         self._end_session = metadata.end_session
 
         self.calendar = metadata.calendar
+        tz_offset = self.calendar.tz._utcoffset.seconds
+        self.tz_utcoffset_seconds = tz_offset - (tz_offset % 3600)  # hours
         slicer = self.calendar.schedule.index.slice_indexer(
             self._start_session,
             self._end_session,
@@ -652,6 +654,7 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
             dts.append(datetime.datetime.fromtimestamp(struct.unpack(">i", k)[0]))
             vals.append(struct.unpack("@i", bytearray(v)[self.FIELD_MAP[field] * self.FIELD_VAL_SIZE:(self.FIELD_MAP[field]+1) * self.FIELD_VAL_SIZE]))
         del it
+        self._close_db(sid, db)
         items = {"dt": dts}
         items[field] = vals
         df = pd.DataFrame.from_dict(items)
@@ -686,6 +689,10 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
         if not self._realtime:
             self.dbs[sid] = db
         return db
+
+    def _close_db(self, sid, db):
+        if self._realtime:
+            db.close()
 
     def _open_minute_file(self, field, sid):
         sid = int(sid)
@@ -730,14 +737,14 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
             (A volume of 0 signifies no trades for the given dt.)
         """
         key = struct.pack(">i", int(dt.value / 10 ** 9))
-        path = self.sidpath(sid)
-        db = self._open_db(sid, path)
+        path = self.sidpath(sid.sid)
+        db = self._open_db(sid.sid, path)
         value = db.get(b'default', key)
-
+        self._close_db(sid.sid, db)
         if value is None:
             value = 0
         else:
-            value = struct.unpack("@i", bytearray(value)[self.FIELD_MAP[field] * self.FIELD_VAL_SIZE:(self.FIELD_MAP[field]+1) * self.FIELD_VAL_SIZE])
+            value = struct.unpack("@i", bytearray(value)[self.FIELD_MAP[field] * self.FIELD_VAL_SIZE:(self.FIELD_MAP[field]+1) * self.FIELD_VAL_SIZE])[0]
         if value == 0:
             if field == 'volume':
                 return 0
@@ -749,7 +756,20 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
         return value
 
     def get_last_traded_dt(self, asset, dt):
-        return pd.NaT
+        sid = asset.sid
+        sidpath = self.sidpath(sid)
+        key = int(dt.value // 10 ** 9)
+        key = struct.pack(">i", key)
+        db = self._open_db(sid, sidpath)
+        it = db.iterkeys(b'default')
+        it.seek_for_prev(key)
+        ret_key = next(it)
+        del it
+        self._close_db(sid, db)
+        ret_key = struct.unpack(">i", ret_key)[0]
+        ret_dt = datetime.datetime.fromtimestamp(ret_key)
+
+        return pd.Timestamp(ret_dt, tz=self.calendar.tz)
 
     def _find_last_traded_position(self, asset, dt):
         return None
@@ -771,6 +791,9 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
         vals = dict()
         local_tz = self.calendar.tz
         for k, v in it:
+            if end is not None:
+                if k > end:
+                    break
             dts.append(datetime.datetime.fromtimestamp(struct.unpack(">i", k)[0]))
             barr = struct.unpack("@iiiii", v)
             for field in fields:
@@ -781,10 +804,16 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
                     vals[field] = val
                 val.append(barr[self.FIELD_MAP[field]])
         del it
-        vals["dt"] = dts
+        self._close_db(sid, db)
+        # vals["dt"] = dts
         df = pd.DataFrame.from_dict(vals)
-        df["dt"] = pd.to_datetime(df['dt'])
-        df.set_index(["dt"])
+        # df["dt"] = pd.to_datetime(df['dt'])
+        ohlc_ratio = self._ohlc_ratio_inverse_for_sid(sid)
+        for field in fields:
+            if field == "volume":
+                continue
+            df[field] = df[field] * ohlc_ratio
+        # df.set_index(["dt"])
         return df
 
     def load_raw_arrays(self, fields, start_dt, end_dt, sids):
@@ -807,22 +836,24 @@ class RocksdbMinuteBarReader(BcolzMinuteBarReader):
             (minutes in range, sids) with a dtype of float64, containing the
             values for the respective field over start and end dt range.
         """
-        start_idx = struct.pack(">i", int(start_dt.value // 10 ** 9))
-        end_idx = struct.pack(">i", int(end_dt.value // 10 ** 9))
+        local_tz = self.calendar.tz
 
-        num_minutes = (end_idx - start_idx + 1)
+        start_idx = struct.pack(">i", int(start_dt.value // 10 ** 9) - self.tz_utcoffset_seconds)
+        end_idx = struct.pack(">i", int(end_dt.value // 10 ** 9) - self.tz_utcoffset_seconds)
+
+        # num_minutes = (end_idx - start_idx + 1)
 
         results = []
 
-        indices_to_exclude = self._exclusion_indices_for_range(
-            start_idx, end_idx)
-        if indices_to_exclude is not None:
-            for excl_start, excl_stop in indices_to_exclude:
-                length = excl_stop - excl_start + 1
-                num_minutes -= length
-
-        shape = num_minutes, len(sids)
+        # indices_to_exclude = self._exclusion_indices_for_range(
+        #     start_idx, end_idx)
+        # if indices_to_exclude is not None:
+        #     for excl_start, excl_stop in indices_to_exclude:
+        #         length = excl_stop - excl_start + 1
+        #         num_minutes -= length
+        #
+        # shape = num_minutes, len(sids)
 
         for sid in sids:
-            results.append(self._get_single_sid_value(sid, fields, start_idx, end_idx))
+            results.append(self._get_single_sid_value(sid.sid, fields, start_idx, end_idx))
         return results
