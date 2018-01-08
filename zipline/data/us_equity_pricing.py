@@ -330,6 +330,8 @@ class BcolzDailyBarWriter(object):
                 for asset_id, table in iterator:
                     if asset_id not in assets:
                         raise ValueError('unknown asset id %r' % asset_id)
+                    if table is None or len(table) <= 0:
+                        continue
                     yield asset_id, table
 
         count = 0
@@ -434,7 +436,8 @@ class BcolzDailyBarWriter(object):
         if isinstance(raw_data, ctable):
             # we already have a ctable so do nothing
             return raw_data
-
+        if raw_data is None or raw_data.empty:
+            return raw_data
         winsorise_uint32(raw_data, invalid_data_behavior, 'volume', *OHLC)
         processed = (raw_data[list(OHLC)] * 1000).astype('uint32')
         dates = raw_data.index.values.astype('datetime64[s]')
