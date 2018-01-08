@@ -71,6 +71,8 @@ def fetch_symbols(engine, assets=None):
 
 def fetch_single_equity(engine, symbol, start=None, end=None, freq='1d'):
     df = engine.get_security_bars(symbol, freq, start, end)
+    if df is None or df.empty:
+        return df
     df['volume'] = df['vol'].astype(np.int32) * 100  # hands * 100 == shares
 
     if freq == '1d':
@@ -258,7 +260,7 @@ def tdx_bundle(assets,
                 func(symbol, start, end, freq),
                 freq=freq,
             )
-            if data is None:
+            if data is None or data.empty:
                 yield int(symbol), pd.DataFrame()
                 continue
             if freq == '1d':
