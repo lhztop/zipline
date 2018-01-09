@@ -85,4 +85,4 @@ cn-treasury_curve>=0.6
 cn-stock-holidays>=1.1
 tdx-wrapper>=0.61
 zerorpc>=0.6.1
-python-rocksdb>=0.6.7
+# python-rocksdb>=0.6.7

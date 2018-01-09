@@ -209,7 +209,7 @@ def tdx_bundle(assets,
                cache,
                show_progress,
                output_dir):
-    eg = Engine(auto_retry=True, multithread=True, best_ip=True, thread_num=8)
+    eg = Engine(auto_retry=True, multithread=True, best_ip=True, thread_num=1)
     eg.connect()
 
     symbols = fetch_symbols(eg, assets)
