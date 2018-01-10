@@ -251,8 +251,15 @@ def tdx_bundle(assets,
         for index, symbol in symbol_map.iteritems():
             try:
                 start = pd.to_datetime(dates_json[freq][symbol], utc=True) + pd.Timedelta('1 D')
-                if start >= end:
-                    continue
+                if start > end:
+                    if freq == '1d'and symbol in dates_json[freq]:
+                        data = pd.read_sql(
+                            "select * from {} where id = {} order by day ASC ".format(SESSION_BAR_TABLE, int(symbol)),
+                            session_bars, index_col='day')
+                        data.index = pd.to_datetime(data.index)
+                        yield int(symbol), data
+                    else:
+                        continue
             except KeyError:
                 start = start_session
             data = reindex_to_calendar(
@@ -261,7 +268,12 @@ def tdx_bundle(assets,
                 freq=freq,
             )
             if data is None or data.empty:
-                yield int(symbol), pd.DataFrame()
+                if freq == '1d'and symbol in dates_json[freq]:
+                    data = pd.read_sql(
+                        "select * from {} where id = {} order by day ASC ".format(SESSION_BAR_TABLE, int(symbol)),
+                        session_bars, index_col='day')
+                    data.index = pd.to_datetime(data.index)
+                    yield int(symbol), data
                 continue
             if freq == '1d':
                 data.to_sql(SESSION_BAR_TABLE, session_bars.connect(), if_exists='append', index_label='day')
