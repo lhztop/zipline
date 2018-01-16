@@ -168,11 +168,10 @@ def get_meta_from_bars(df):
     ])
 
 
-def reindex_to_calendar(calendar, data, freq='1d', start_session=None, end_session=None):
+def reindex_to_calendar(calendar, data, freq='1d'):
     if data.empty:
         return None
-    if start_session is None:
-        start_session, end_session = data.index[[0, -1]]
+    start_session, end_session = data.index[[0, -1]]
     if not isinstance(start_session, pd.Timestamp):
         start_session = pd.Timestamp(start_session, unit='m')
         end_session = pd.Timestamp(end_session, unit='m')
@@ -185,7 +184,6 @@ def reindex_to_calendar(calendar, data, freq='1d', start_session=None, end_sessi
         df = data.reindex(all_sessions, copy=False)
         df = fillna(df)
         df.id.fillna(method='pad', inplace=True)
-        df.id.fillna(method="bfill", inplace=True)
         df.day = df.index.values.astype('datetime64[m]').astype(np.int64)
     else:
         all_sessions = calendar.minutes_for_sessions_in_range(start_session, end_session).tz_localize(None)
@@ -267,7 +265,6 @@ def tdx_bundle(assets,
             data = reindex_to_calendar(
                 calendar,
                 func(symbol, start, end, freq),
-                start_session=start, end_session=end,
                 freq=freq,
             )
             if data is None or data.empty:
@@ -279,12 +276,6 @@ def tdx_bundle(assets,
                     yield int(symbol), data
                 continue
             if freq == '1d':
-                if data.close.isnull()[0]:  # padding fill error if the first is NaN
-                    data2 = pd.read_sql(
-                        "select * from {} where id = {} order by day desc limit 1 ".format(SESSION_BAR_TABLE, int(symbol)),
-                        session_bars, index_col='day')
-                    data["close"][0] = data2["close"][0]
-                    fillna(data)
                 data.to_sql(SESSION_BAR_TABLE, session_bars.connect(), if_exists='append', index_label='day')
                 if symbol in dates_json[freq]:
                     data = pd.read_sql(

@@ -18,7 +18,7 @@ from ..us_equity_pricing import (
 from ..fundamental import FundamentalReader, FundamentalWriter
 try:
     from ..rocksdb_bars import RocksdbMinuteBarWriter, RocksdbMinuteBarReader
-except Exception as ex:
+except:
     from ..minute_bars import BcolzMinuteBarReader as RocksdbMinuteBarReader
     from ..minute_bars import BcolzMinuteBarWriter as RocksdbMinuteBarWriter
 from ..minute_bars import (
