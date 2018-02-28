@@ -423,11 +423,13 @@ def zipline_magic(line, cell=None):
     help='writer class name for bundle to write minute data'
 )
 def ingest(bundle, assets, minute, start, fundamental, assets_version, show_progress, writer):
+    df = None
+    if assets:
+        if not os.path.exists(assets):
+            raise FileNotFoundError
+        df = pd.read_csv(assets, names=['symbol', 'name'], dtype=str, encoding='utf8')
     if bundle == 'tdx':
-        if assets:
-            if not os.path.exists(assets):
-                raise FileNotFoundError
-            df = pd.read_csv(assets, names=['symbol', 'name'], dtype=str, encoding='utf8')
+        if df is not None and len(df) > 0:
             register_tdx(df,minute,start,fundamental)
         else:
             register_tdx(None,minute,start,fundamental)

@@ -1,3 +1,4 @@
+# coding=utf-8
 #
 # Copyright 2016 Quantopian, Inc.
 #
@@ -427,7 +428,7 @@ class CnPerShare(EquityCommissionModel):
         """
         additional_commission = abs(transaction.amount * transaction.price * params.cost_per_unit)
         additional_cost = transaction.amount * transaction.price * params.tax
-        if order.sid.sid >= 600000:
+        if order.sid.sid >= 600000: # 沪市有过户费
             additional_cost += transaction.amount * transaction.price * params.transfer
         if order.commission == 0:
             # no commission paid yet, pay at least the minimum plus a one-time

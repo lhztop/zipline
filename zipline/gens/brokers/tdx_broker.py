@@ -340,10 +340,12 @@ class TdxBroker(Broker):
         df = pd.DataFrame()
 
         for asset in assets:
-            symbol = str(asset.symbol)
             self.subscribe_to_market_data(asset)
-            self._update_bars()
-
+        self._update_bars()
+        for asset in assets:
+            symbol = str(asset.symbol)
+            if symbol not in self._bars:
+                continue
             trade_prices = self._bars[symbol]['price']
             trade_sizes = self._bars[symbol]['vol']
             ohlcv = trade_prices.resample(resample_freq,
