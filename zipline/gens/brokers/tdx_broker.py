@@ -74,7 +74,7 @@ class TdxBroker(Broker):
         for code in self.subscribed_assets:
             bars = self._mkt_client.time_and_price(code.symbol)
             if bars.empty:
-                return
+                continue
             bars.index = bars.index.tz_localize('Asia/Shanghai').tz_convert('UTC')
             self._bars[code.symbol] = bars
 
