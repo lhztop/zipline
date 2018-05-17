@@ -77,6 +77,7 @@ cn-zipline-live与zipline大同小异，具体使用方法请参考zipline
 
 > zipline ingest -b tdx -a assets.csv --minute False --start 20170901
 > --overwrite True
+> 
 
 `-a assets.csv` 指定需要 `ingest` 的代码列表，缺省ingest
 4000+只所有股票，耗时长达3、4小时，通过 `-a tests/ETF.csv` 只ingest
@@ -90,6 +91,12 @@ ETF基金数据，一方面可以节省时间达到快速测试的目的。
 `--overwrite True`
 由于分钟数据获取速度较慢，默认start至今超过3年的话，只拿3年数据，日线数据依然以start为准，overwrite为True时，强制拿从start开始
 至今的分钟数据
+
+`--localdb_ip 127.0.0.1`
+由于tdx本身的数据不稳定，在连续异步获取N多年数据时出错，因此这个参数`localdb_ip`配合`localdb_port`可以从本地mongodb导入数据。
+
+`localdb_port 27017`
+指定mongodb端口，配合`localdb_ip`使用。
 
 二、编写策略以及运行策略： -----------
 
