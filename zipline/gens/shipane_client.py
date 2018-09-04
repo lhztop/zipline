@@ -179,7 +179,7 @@ class ShipaneClient(Client):
         return z_positions
 
     def order(self, code, volume, price, action, order_type):
-        if order_type != LIMIT_CHARGE:
+        if order_type != LIMIT_CHARGE and order_type != FIVE_LEVEL_MARKET_ORDER:
             raise Exception("only support limit order, other order is not supported")
         ret = None
         if action == BUY:
